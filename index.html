@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>方包包 Mastermind｜珠璣棋</title>
+<style>
+*{box-sizing:border-box;font-family:system-ui, sans-serif;margin:0;padding:0}
+body{
+  min-height:100vh;
+  color:#fff;
+  padding:12px;
+  padding-bottom:170px;
+  max-width:600px;
+  margin:0 auto;
+  background: var(--body-gradient);
+  background-attachment: fixed;
+  position: relative;
+  overflow-x:hidden;
+  transition: background 0.6s ease;
+}
+/* 彩色光斑裝飾 */
+body::before,
+body::after{
+  content:"";
+  position:fixed;
+  border-radius:50%;
+  filter:blur(60px);
+  opacity:0.55;
+  z-index:-1;
+  transition: background 0.6s ease;
+}
+body::before{
+  width:260px;
+  height:260px;
+  top:-60px;
+  right:-40px;
+  background: var(--blob1-color);
+}
+body::after{
+  width:320px;
+  height:320px;
+  bottom:80px;
+  left:-80px;
+  background: var(--blob2-color);
+}
+h1{
+  text-align:center;
+  margin-bottom:10px;
+  font-size:34px;
+  font-weight:bold;
+  background: linear-gradient(90deg,#ff6ec7,#ffdd55,#45e0ff,#a855f7);
+  -webkit-background-clip:text;
+  color:transparent;
+  text-shadow: 0 0 12px rgba(255,255,255,0.4);
+}
+.info{text-align:center;margin-bottom:14px;font-size:16px;color:#f5f5f5;font-weight:600}
+.board{display:flex;flex-direction:column;gap:8px}
+.row{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  background:rgba(39,41,61,0.55);
+  padding:8px 12px;
+  border-radius:10px;
+  backdrop-filter: blur(4px);
+}
+/* 左邊行號 */
+.rowNum{
+  width:36px;
+  text-align:right;
+  font-size:24px;
+  color:#ffdd55;
+  font-weight:900;
+  letter-spacing:0.5px;
+}
+.guessSlots{display:flex;gap:8px}
+.slot{width:36px;height:36px;border-radius:50%;background:#444;border:2px solid #555}
+.hintBox{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;width:36px}
+.hint{width:17px;height:17px;border-radius:50%}
+.hint.black{background:#000;border:1px solid #666}
+.hint.white{background:#ffffff;border:1px solid #888}
+.currentRow{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  background:rgba(44,50,85,0.7);
+  padding:10px 12px;
+  border-radius:12px;
+  border:2px solid #42a5f5;
+  backdrop-filter: blur(4px);
+}
+.currentRow .slot{width:38px;height:38px;border-color:#42a5f5}
+.bottomBar{
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
+  background:rgba(39,41,61,0.8);
+  padding:14px 14px 18px;
+  border-top:1px solid rgba(255,255,255,0.15);
+  max-width:600px;
+  margin:0 auto;
+  backdrop-filter: blur(6px);
+}
+.colorPalette{display:flex;gap:10px;justify-content:center;margin-bottom:12px}
+.colorBtn{width:46px;height:46px;border-radius:50%;border:3px solid #fff;cursor:pointer}
+.colorBtn:active{transform:scale(0.92)}
+.btns{display:flex;gap:10px;justify-content:center}
+button{padding:12px 16px;border:none;border-radius:10px;font-weight:bold;cursor:pointer;font-size:16px}
+#reset{background:#ef5350;color:#fff}
+#submit{background:#42a5f5;color:#000}
+#soundToggle{background:#2ecc71;color:#fff}
+#soundToggle.off{background:#7f8c8d;color:#fff}
+.status{text-align:center;margin-top:10px;font-weight:bold;font-size:18px}
+</style>
+</head>
+<body>
+<h1>方包包 Mastermind</h1>
+<div class="info">黑色=顏色+位置正確｜白色=顏色正確但位置錯誤</div>
+<div id="board" class="board"></div>
+<div class="status" id="status"></div>
+<div class="bottomBar">
+  <div class="colorPalette">
+    <div class="colorBtn" style="background:#e53935" data-color="red"></div>
+    <div class="colorBtn" style="background:#43a047" data-color="green"></div>
+    <div class="colorBtn" style="background:#1e88e5" data-color="blue"></div>
+    <div class="colorBtn" style="background:#fdd835" data-color="yellow"></div>
+    <div class="colorBtn" style="background:#8e24aa" data-color="purple"></div>
+    <div class="colorBtn" style="background:#f57c00" data-color="orange"></div>
+  </div>
+  <div class="btns">
+    <button id="reset">重新開局</button>
+    <button id="submit">提交今次猜測</button>
+    <button id="soundToggle">音效：開</button>
+  </div>
+</div>
+<script>
+// ========== 音效開關 ==========
+let soundOn = true;
+const soundToggleBtn = document.getElementById("soundToggle");
+soundToggleBtn.onclick = () => {
+    soundOn = !soundOn;
+    if(soundOn){
+        soundToggleBtn.textContent = "音效：開";
+        soundToggleBtn.classList.remove("off");
+    }else{
+        soundToggleBtn.textContent = "音效：關";
+        soundToggleBtn.classList.add("off");
+    }
+};
+// ========== 音效模組：Web Audio ==========
+let audioCtx=null;
+function initAudio(){
+    if(!audioCtx){
+        audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    }
+    if(audioCtx.state === 'suspended'){
+        audioCtx.resume();
+    }
+}
+// 重新開局開場短旋律
+function playStartJingle(){
+    if(!soundOn) return;
+    initAudio();
+    const ctx=audioCtx;
+    const tempo=130;
+    const beat=60/tempo;
+    const notes=[
+        {freq:523.25, time:0, dur:beat*0.5},
+        {freq:659.25, time:beat*0.5, dur:beat*0.5},
+        {freq:783.99, time:beat*1, dur:beat*0.75},
+        {freq:659.25, time:beat*1.75, dur:beat*0.5},
+        {freq:523.25, time:beat*2.25, dur:beat*0.75},
+    ];
+    notes.forEach(n=>{
+        const osc=ctx.createOscillator();
+        const gain=ctx.createGain();
+        osc.type="sine";
+        osc.frequency.value=n.freq;
+        gain.gain.setValueAtTime(0.001, ctx.currentTime+n.time);
+        gain.gain.linearRampToValueAtTime(0.65, ctx.currentTime+n.time+0.02);
+        gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime+n.time+n.dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime+n.time);
+        osc.stop(ctx.currentTime+n.time+n.dur+0.02);
+    })
+}
+// 勝利歡呼聲和弦
+function playWinSound(){
+    if(!soundOn) return;
+    initAudio();
+    const ctx = audioCtx;
+    const t = ctx.currentTime;
+    const freqs = [523.25, 659.63, 783.99];
+    freqs.forEach(freq=>{
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type="sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0,t);
+        gain.gain.linearRampToValueAtTime(0.70, t+0.01);
+        gain.gain.linearRampToValueAtTime(0, t+0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t+0.4);
+    })
+}
+// 失敗爆炸嘭聲
+function playLoseExplodeSound(){
+    if(!soundOn) return;
+    initAudio();
+    const ctx = audioCtx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type="sawtooth";
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.linearRampToValueAtTime(20, t+0.25);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.85, t+0.02);
+    gain.gain.linearRampToValueAtTime(0, t+0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t+0.35);
+}
+// 顏色按鈕：統一單一「滴」聲
+function playColorNote(){
+    if(!soundOn) return;
+    initAudio();
+    const ctx = audioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    const t = ctx.currentTime;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.85, t+0.008);
+    gain.gain.linearRampToValueAtTime(0, t+0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t+0.22);
+}
+// ========== 背景 ==========
+const BACKGROUND_SETS = [
+  {
+    gradient: "linear-gradient(135deg, #2a1a6b 0%, #5a2a9f 25%, #b242c6 50%, #ff9a3c 75%, #ffe066 100%)",
+    blob1: "#ff6ec7",
+    blob2: "#45e0ff"
+  },
+  {
+    gradient: "linear-gradient(135deg, #0f3443 0%, #34e89e 50%, #00d2ff 100%)",
+    blob1: "#7ef9c9",
+    blob2: "#40bfff"
+  },
+  {
+    gradient: "linear-gradient(135deg, #4a148c 0%, #d81b60 50%, #ffb300 100%)",
+    blob1: "#ff80ab",
+    blob2: "#ffd54f"
+  },
+  {
+    gradient: "linear-gradient(135deg, #1a237e 0%, #5c6bc0 50%, #b39ddb 100%)",
+    blob1: "#bbdefb",
+    blob2: "#ce93d8"
+  }
+];
+function setRandomBackground(){
+  const idx = Math.floor(Math.random() * BACKGROUND_SETS.length);
+  const cfg = BACKGROUND_SETS[idx];
+  document.body.style.setProperty('--body-gradient', cfg.gradient);
+  document.body.style.setProperty('--blob1-color', cfg.blob1);
+  document.body.style.setProperty('--blob2-color', cfg.blob2);
+}
+setRandomBackground();
+const COLORS=["red","green","blue","yellow","purple","orange"];
+const COLOR_MAP = {
+  red:"#e53935",
+  green:"#43a047",
+  blue:"#1e88e5",
+  yellow:"#fdd835",
+  purple:"#8e24aa",
+  orange:"#f57c00"
+};
+let secret=[];
+let currentGuess=[null,null,null,null];
+let attempts=0;
+const MAX_ATTEMPTS=10;
+let gameOver=false;
+let history=[];
+function newGame(){
+    setRandomBackground();
+    playStartJingle();
+    secret=[];
+    for(let i=0;i<4;i++) secret.push(COLORS[Math.floor(Math.random()*COLORS.length)]);
+    currentGuess=[null,null,null,null];
+    attempts=0;gameOver=false;
+    history=[];
+    document.getElementById("status").textContent="";
+    render();
+}
+function render(){
+    const board=document.getElementById("board");
+    board.innerHTML="";
+    history.forEach((item,idx)=>{
+        const row=document.createElement("div");
+        row.className="row";
+        row.innerHTML=`
+          <div class="rowNum">${idx+1}</div>
+          <div class="guessSlots">
+            <div class="slot" style="background:${COLOR_MAP[item.guess[0]]}"></div>
+            <div class="slot" style="background:${COLOR_MAP[item.guess[1]]}"></div>
+            <div class="slot" style="background:${COLOR_MAP[item.guess[2]]}"></div>
+            <div class="slot" style="background:${COLOR_MAP[item.guess[3]]}"></div>
+          </div>
+          <div class="hintBox">
+            ${Array(item.hint.black).fill('<div class="hint black"></div>').join("")}
+            ${Array(item.hint.white).fill('<div class="hint white"></div>').join("")}
+          </div>
+        `;
+        board.appendChild(row);
+    });
+    const currentRow=document.createElement("div");
+    currentRow.className="currentRow";
+    currentRow.innerHTML=`
+      <div style="width:36px;"></div>
+      <div class="guessSlots">
+        <div class="slot" data-pos="0"></div>
+        <div class="slot" data-pos="1"></div>
+        <div class="slot" data-pos="2"></div>
+        <div class="slot" data-pos="3"></div>
+      </div>
+      <div class="hintBox"></div>
+    `;
+    const slots=currentRow.querySelectorAll(".slot");
+    slots.forEach((s,i)=>{
+        if(currentGuess[i]){
+            s.style.background=COLOR_MAP[currentGuess[i]];
+        }else{
+            s.style.background="#444";
+        }
+        s.onclick=()=>{
+            if(gameOver) return;
+            currentGuess[i]=null;
+            render();
+        };
+    });
+    board.appendChild(currentRow);
+}
+document.querySelectorAll(".colorBtn").forEach(btn=>{
+    btn.onclick=()=>{
+        if(gameOver) return;
+        playColorNote();
+        const emptyIdx = currentGuess.findIndex(x => x === null);
+        if(emptyIdx !== -1){
+            currentGuess[emptyIdx] = btn.dataset.color;
+            render();
+        }
+    }
+})
+function calculateHint(guess,secretArr){
+    let black=0;
+    let g=[...guess],s=[...secretArr];
+    for(let i=0;i<4;i++){
+        if(g[i]===s[i]){ black++; g[i]=null; s[i]=null; }
+    }
+    let white=0;
+    for(let i=0;i<4;i++){
+        if(g[i]==null) continue;
+        let idx=s.indexOf(g[i]);
+        if(idx!==-1){ white++; s[idx]=null; }
+    }
+    return {black,white};
+}
+document.getElementById("submit").onclick=()=>{
+    if(gameOver) return;
+    if(currentGuess.some(x=>x===null)){
+        document.getElementById("status").textContent="⚠️ 請填滿4個顏色！";
+        return;
+    }
+    attempts++;
+    const res=calculateHint(currentGuess,secret);
+    history.push({guess:[...currentGuess],hint:res});
+    if(res.black===4){
+        document.getElementById("status").textContent="🎉 恭喜！破解密碼！";
+        playWinSound();
+        gameOver=true;
+        render();
+        return;
+    }
+    if(attempts>=MAX_ATTEMPTS){
+        document.getElementById("status").textContent="💀 次數用盡，遊戲結束！";
+        playLoseExplodeSound();
+        gameOver=true;
+        render();
+        return;
+    }
+    document.getElementById("status").textContent=`剩餘次數：${MAX_ATTEMPTS-attempts}`;
+    currentGuess=[null,null,null,null];
+    render();
+}
+document.getElementById("reset").onclick=newGame;
+newGame();
+</script>
+</body>
+</html>
